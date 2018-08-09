@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sync"
 )
 
 var (
@@ -19,89 +20,123 @@ const (
 )
 
 type Logger interface {
-	Debug(v ...interface{})
-	Debugf(format string, v ...interface{})
-
-	Info(v ...interface{})
-	Infof(format string, v ...interface{})
-
-	Warning(v ...interface{})
-	Warningf(format string, v ...interface{})
-
-	Error(v ...interface{})
-	Errorf(format string, v ...interface{})
-
-	Fatal(v ...interface{})
-	Fatalf(format string, v ...interface{})
-
-	Panic(v ...interface{})
-	Panicf(format string, v ...interface{})
+	Debug(format string, v ...interface{})
+	Info(format string, v ...interface{})
+	Warning(format string, v ...interface{})
+	Error(format string, v ...interface{})
+	Fatal(format string, v ...interface{})
+	Panic(format string, v ...interface{})
 }
 
 // RaftLogger is the default logger in Raft-Go
 type RaftLogger struct {
 	*log.Logger
-	isDebug bool
+	lock       sync.Mutex
+	debug      bool
+	async      bool
+	msgChanLen int64
+	msgChan    chan *logMsg
+	signalChan chan string
+	wg         sync.WaitGroup
 }
 
-func (l *RaftLogger) EnableTimestamps() {
-	l.SetFlags(l.Flags() | log.Ldate | log.Ltime)
+type logMsg struct {
+	msg string
 }
 
-func (l *RaftLogger) EnableDebug() {
-	l.isDebug = true
+var logMsgPool *sync.Pool
+
+func (rl *RaftLogger) EnableTimestamps() {
+	rl.SetFlags(rl.Flags() | log.Ldate | log.Ltime)
 }
 
-func (l *RaftLogger) Debug(v ...interface{}) {
-	if l.isDebug {
-		l.Output(callDepth, header("DEBUG", fmt.Sprint(v...)))
+func (rl *RaftLogger) EnableDebug() {
+	rl.debug = true
+}
+
+func (rl *RaftLogger) Async(msgLen int64) *RaftLogger {
+	rl.lock.Lock()
+	defer rl.lock.Unlock()
+	if rl.async {
+		return rl
+	}
+	rl.msgChanLen = msgLen
+	rl.msgChan = make(chan *logMsg, rl.msgChanLen)
+	logMsgPool = &sync.Pool{
+		New: func() interface{} {
+			return &logMsg{}
+		},
+	}
+	rl.wg.Add(1)
+	go rl.startLogger()
+	return rl
+}
+
+func (rl *RaftLogger) startLogger() {
+	exit := false
+	for {
+		select {
+		case msg := <-rl.msgChan:
+			rl.writeToLogger(msg.msg)
+			logMsgPool.Put(msg)
+		case sig := <-rl.signalChan:
+			// signals include: `flush`, `close`
+			rl.flush()
+			if sig == "close" {
+				exit = true
+			}
+			rl.wg.Done()
+		}
+		if exit {
+			break
+		}
 	}
 }
 
-func (l *RaftLogger) Debugf(format string, v ...interface{}) {
-	if l.isDebug {
-		l.Output(callDepth, header("DEBUG", fmt.Sprintf(format, v)))
+func (rl *RaftLogger) writeToLogger(msg string) {
+	// TODO
+}
+
+func (rl *RaftLogger) flush() {
+	if rl.async {
+		for {
+			// fetch all log message and write to logger.
+			if len(rl.msgChan) > 0 {
+				m := <-rl.msgChan
+				rl.writeToLogger(m.msg)
+				logMsgPool.Put(m)
+				continue
+			}
+			break
+		}
+	}
+	// TODO: maybe flush()
+}
+
+func (rl *RaftLogger) Debug(format string, v ...interface{}) {
+	if rl.debug {
+		rl.Output(callDepth, header("DEBUG", fmt.Sprintf(format, v)))
 	}
 }
 
-func (l *RaftLogger) Info(v ...interface{}) {
-	l.Output(callDepth, header("Info", fmt.Sprint(v...)))
+func (rl *RaftLogger) Info(format string, v ...interface{}) {
+	rl.Output(callDepth, header("Info", fmt.Sprintf(format, v...)))
 }
 
-func (l *RaftLogger) Infof(format string, v ...interface{}) {
-	l.Output(callDepth, header("Info", fmt.Sprintf(format, v...)))
+func (rl *RaftLogger) Warning(format string, v ...interface{}) {
+	rl.Output(callDepth, header("Warning", fmt.Sprintf(format, v...)))
 }
 
-func (l *RaftLogger) Warning(v ...interface{}) {
-	l.Output(callDepth, header("Warning", fmt.Sprint(v...)))
+func (rl *RaftLogger) Error(format string, v ...interface{}) {
+	rl.Output(callDepth, header("Error", fmt.Sprintf(format, v...)))
 }
 
-func (l *RaftLogger) Warningf(format string, v ...interface{}) {
-	l.Output(callDepth, header("Warning", fmt.Sprintf(format, v...)))
+func (rl *RaftLogger) Fatal(format string, v ...interface{}) {
+	rl.Output(callDepth, header("Fatal", fmt.Sprintf(format, v...)))
 }
 
-func (l *RaftLogger) Error(v ...interface{}) {
-	l.Output(callDepth, header("Error", fmt.Sprint(v...)))
-}
-
-func (l *RaftLogger) Errorf(format string, v ...interface{}) {
-	l.Output(callDepth, header("Error", fmt.Sprintf(format, v...)))
-}
-
-func (l *RaftLogger) Fatal(v ...interface{}) {
-	l.Output(callDepth, header("Fatal", fmt.Sprint(v...)))
-}
-
-func (l *RaftLogger) Fatalf(format string, v ...interface{}) {
-	l.Output(callDepth, header("Fatal", fmt.Sprintf(format, v...)))
-}
-
-func (l *RaftLogger) Panic(v ...interface{}) {
-	l.Output(callDepth, header("Panic", fmt.Sprint(v...)))
-}
-
-func (l *RaftLogger) Panicf(format string, v ...interface{}) {
-	l.Output(callDepth, header("Panic", fmt.Sprintf(format, v...)))
+func (rl *RaftLogger) Panic(format string, v ...interface{}) {
+	rl.Output(callDepth, header("Panic", fmt.Sprintf(format, v...)))
 }
 
 func header(val, msg string) string {
