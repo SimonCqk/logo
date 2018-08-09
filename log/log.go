@@ -29,7 +29,7 @@ const (
 	LevelPanic
 )
 
-var logLevelStr = map[int]string{
+var logLevelPrefix = map[int]string{
 	LevelInfo:    "Info",
 	LevelDebug:   "Debug",
 	LevelWarning: "Warning",
@@ -169,6 +169,29 @@ func (rl *RaftLogger) flush() {
 	}
 }
 
+func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
+	return
+}
+
+func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
+
+	if rl.async {
+		lm := logMsgPool.Get().(*logMsg)
+		lm.level = level
+		lm.msg = logFormatter(level, msg, v...)
+		lm.when = time.Now()
+		rl.msgChan <- lm
+	} else {
+		lm := &logMsg{
+			level: level,
+			msg:   logFormatter(level, msg, v...),
+			when:  time.Now(),
+		}
+		rl.writeToLoggers(lm)
+	}
+	return nil
+}
+
 /*
 func (rl *RaftLogger) Debug(format string, v ...interface{}) {
 	if rl.debug {
@@ -198,5 +221,5 @@ func (rl *RaftLogger) Panic(format string, v ...interface{}) {
 */
 
 func logFormatter(level int, format string, msg ...interface{}) string {
-	return logLevelStr[level] + fmt.Sprintf(format, msg...)
+	return logLevelPrefix[level] + fmt.Sprintf(format, msg...)
 }
