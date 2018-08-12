@@ -3,15 +3,19 @@ package log
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"sync"
 	"time"
 )
 
 var (
-	defaultLogger = &RaftLogger{Logger: log.New(os.Stderr, "raft", log.LstdFlags)}
-	raftLogger    = Logger(defaultLogger)
+	defaultLogger = &RaftLogger{
+		level:      LevelDebug,
+		callDepth:  defaultCallDepth,
+		msgChanLen: defaultAsyncMsgLen,
+		outputs:    []*nameLogger{},
+	}
+	raftLogger = defaultLogger
 )
 
 const (
@@ -174,7 +178,6 @@ func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
 }
 
 func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
-
 	if rl.async {
 		lm := logMsgPool.Get().(*logMsg)
 		lm.level = level
@@ -192,34 +195,48 @@ func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
 	return nil
 }
 
-/*
 func (rl *RaftLogger) Debug(format string, v ...interface{}) {
-	if rl.debug {
-		rl.Output(defaultCallDepth, header("DEBUG", fmt.Sprintf(format, v)))
+	if rl.level > LevelDebug {
+		return
 	}
+	rl.writeMsg(LevelDebug, format, v...)
 }
 
 func (rl *RaftLogger) Info(format string, v ...interface{}) {
-	rl.Output(defaultCallDepth, header("Info", fmt.Sprintf(format, v...)))
+	if rl.level > LevelInfo {
+		return
+	}
+	rl.writeMsg(LevelInfo, format, v...)
 }
 
 func (rl *RaftLogger) Warning(format string, v ...interface{}) {
-	rl.Output(defaultCallDepth, header("Warning", fmt.Sprintf(format, v...)))
+	if rl.level > LevelWarning {
+		return
+	}
+	rl.writeMsg(LevelWarning, format, v...)
 }
 
 func (rl *RaftLogger) Error(format string, v ...interface{}) {
-	rl.Output(defaultCallDepth, header("Error", fmt.Sprintf(format, v...)))
+	if rl.level > LevelError {
+		return
+	}
+	rl.writeMsg(LevelError, format, v...)
 }
 
 func (rl *RaftLogger) Fatal(format string, v ...interface{}) {
-	rl.Output(defaultCallDepth, header("Fatal", fmt.Sprintf(format, v...)))
+	if rl.level > LevelFatal {
+		return
+	}
+	rl.writeMsg(LevelFatal, format, v...)
 }
 
 func (rl *RaftLogger) Panic(format string, v ...interface{}) {
-	rl.Output(defaultCallDepth, header("Panic", fmt.Sprintf(format, v...)))
+	if rl.level > LevelPanic {
+		return
+	}
+	rl.writeMsg(LevelPanic, format, v...)
 }
-*/
 
-func logFormatter(level int, format string, msg ...interface{}) string {
-	return logLevelPrefix[level] + fmt.Sprintf(format, msg...)
+func logFormatter(level int, msg string, v ...interface{}) string {
+	return logLevelPrefix[level] + fmt.Sprintf(msg, v...)
 }
