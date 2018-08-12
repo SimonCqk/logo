@@ -1,8 +1,9 @@
 package log
 
+/// `log` package of Raft-Go, inspired by Beego.
+
 import (
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -13,7 +14,7 @@ var (
 		level:      LevelDebug,
 		callDepth:  defaultCallDepth,
 		msgChanLen: defaultAsyncMsgLen,
-		outputs:    []*nameLogger{},
+		outputs:    []*namedLogger{},
 	}
 	raftLogger = defaultLogger
 )
@@ -23,7 +24,7 @@ const (
 	defaultAsyncMsgLen = 1e3 // 1000
 )
 
-// log level constants
+// Log level constants
 const (
 	LevelInfo = iota
 	LevelDebug
@@ -42,19 +43,36 @@ var logLevelPrefix = map[int]string{
 	LevelPanic:   "Panic",
 }
 
-type Logger interface {
-	io.WriteCloser
+// Name for logger adapters
+const (
+	AdapterConsole = "console"
+	AdapterFile    = "file"
+	AdapterMail    = "mail"
+	AdapterConnect = "connect"
+)
 
+type newLoggerFunc func() Logger
+
+type Logger interface {
+	Init(config string) error
 	WriteMsg(level int, when time.Time, msg string) error
 	Destroy()
 	Flush()
+}
 
-	Info(format string, v ...interface{})
-	Debug(format string, v ...interface{})
-	Warning(format string, v ...interface{})
-	Error(format string, v ...interface{})
-	Fatal(format string, v ...interface{})
-	Panic(format string, v ...interface{})
+// adapters for diff-kinds of logging output instance.
+var adapters = make(map[string]newLoggerFunc)
+
+// Register makes a log provider available by the provided name.
+// Redundant registration will lead panic.
+func Register(name string, loggerFunc newLoggerFunc) {
+	if loggerFunc == nil {
+		panic("log: Register provider is nil")
+	}
+	if _, dup := adapters[name]; dup {
+		panic("log: Named provider has existed, name: " + name)
+	}
+	adapters[name] = loggerFunc
 }
 
 // RaftLogger is the default logger in Raft-Go
@@ -67,10 +85,10 @@ type RaftLogger struct {
 	msgChan    chan *logMsg
 	signalChan chan string
 	wg         sync.WaitGroup
-	outputs    []*nameLogger
+	outputs    []*namedLogger
 }
 
-type nameLogger struct {
+type namedLogger struct {
 	Logger
 	name string
 }
@@ -102,6 +120,11 @@ func (rl *RaftLogger) EnableDebug() {
 	rl.level = LevelDebug
 }
 
+func (rl *RaftLogger) SetLevel(level int) {
+	rl.level = level
+}
+
+// Async enables asynchronous logging.
 func (rl *RaftLogger) Async(msgLen int64) *RaftLogger {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
@@ -121,6 +144,9 @@ func (rl *RaftLogger) Async(msgLen int64) *RaftLogger {
 	return rl
 }
 
+// startLogger is the concrete goroutine serves for async-logging.
+// It receives msg to log or receives signal and reacts by what signal
+// instructs, `flush` or `close`.
 func (rl *RaftLogger) startLogger() {
 	exit := false
 	for {
@@ -144,6 +170,37 @@ func (rl *RaftLogger) startLogger() {
 			break
 		}
 	}
+}
+
+// SetLogger provides a registered logger into RaftLogger with config.
+// Config should be JSON-format, and it will initialize logger in Init().
+func (rl *RaftLogger) SetLogger(adapterName string, configs ...string) error {
+	rl.lock.Lock()
+	defer rl.lock.Unlock()
+	return rl.setLogger(adapterName, configs...)
+}
+
+// setLogger adds an output target for logging, it can be console, file, remote
+// address...etc
+func (rl *RaftLogger) setLogger(adapterName string, configs ...string) error {
+	config := append(configs, "{}")[0]
+	for _, l := range rl.outputs {
+		if l.name == adapterName {
+			return fmt.Errorf("log: redundant adapter name %s (you've set this logger before)", adapterName)
+		}
+	}
+	logFunc, ok := adapters[adapterName]
+	if !ok {
+		return fmt.Errorf("log: unkown adapter name %s (please register it before)", adapterName)
+	}
+	lg := logFunc()
+	err := lg.Init(config)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "log.SetLogger: "+err.Error())
+		return err
+	}
+	rl.outputs = append(rl.outputs, &namedLogger{name: adapterName, Logger: lg})
+	return nil
 }
 
 func (rl *RaftLogger) writeToLoggers(msg *logMsg) {
