@@ -295,5 +295,19 @@ func (rl *RaftLogger) Panic(format string, v ...interface{}) {
 }
 
 func logFormatter(level int, msg string, v ...interface{}) string {
-	return logLevelPrefix[level] + fmt.Sprintf(msg, v...)
+	toLog := logLevelPrefix[level] + fmt.Sprintf(msg, v...)
+	switch level {
+	case LevelInfo:
+		return coloredText(TextWhite, toLog)
+	case LevelDebug:
+		return coloredText(TextCyan, toLog)
+	case LevelWarning:
+		return coloredText(TextYellow, toLog)
+	case LevelError:
+		return coloredText(TextMagenta, toLog)
+	case LevelFatal, LevelPanic:
+		return coloredText(TextRed, toLog)
+	default:
+		return toLog
+	}
 }
