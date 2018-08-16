@@ -17,17 +17,14 @@ const (
 	TextWhite
 )
 
-const colorFormatter = "\x1b[0;%dm%s\x1b[0m"
+const colorFormatTemplate = "\x1b[0;%dm%s\x1b[0m"
 
 // return processed text with specified color.
 func coloredText(color int, str string) string {
 	if isWindows() {
 		return str
 	}
-	if color >= TextBlack && color <= TextWhite {
-		return fmt.Sprintf(colorFormatter, color, str)
-	}
-	return str
+	return fmt.Sprintf(colorFormatTemplate, color, str)
 }
 
 func isWindows() bool {
