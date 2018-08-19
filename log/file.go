@@ -1,9 +1,11 @@
 package log
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -121,4 +123,58 @@ func (w *fileLogWriter) initFd() error {
 
 	}
 	return nil
+}
+
+func (w *fileLogWriter) dailyRotate(openTime time.Time) {
+	// year, month, day of next day
+	y, m, d := openTime.Add(24 * time.Hour).Date()
+	nextDay := time.Date(y, m, d, 0, 0, 0, 0, openTime.Location())
+	// add 100 nanosecond offset
+	timer := time.NewTimer(time.Duration(nextDay.UnixNano() - openTime.UnixNano() + 100))
+	select {
+	case <-timer.C:
+		w.Lock()
+		if w.needRotate(time.Now().Day()) {
+			if err := w.doRotate(time.Now()); err != nil {
+				fmt.Fprintf(os.Stderr, "error in FileLogWriter[%s]: %s", w.Filename, err.Error())
+			}
+		}
+		w.Unlock()
+	}
+}
+
+func (w *fileLogWriter) needRotate(day int) bool {
+	return (w.MaxLines > 0 && w.curLines >= w.MaxLines) ||
+		(w.MaxSize > 0 && w.curSize >= w.MaxSize) ||
+		(w.Daily && day != w.dailyOpenDate)
+}
+
+func (w *fileLogWriter) doRotate(now time.Time) error {
+	return nil
+}
+
+func (w *fileLogWriter) lines() (int, error) {
+	// readonly
+	fd, err := os.Open(w.Filename)
+	if err != nil {
+		return 0, err
+	}
+	defer fd.Close()
+	// read 32k each time
+	// according to my verification, 4k~32k has a obvious performance gap,
+	// while >32k the gap slows down, so 32k is a suitable size
+	buf := make([]byte, 32*(1<<10))
+	count := 0
+	lineSep := []byte{'\n'}
+	for {
+		c, err := fd.Read(buf)
+		if err != nil && err != io.EOF {
+			return count, err
+		}
+		count += bytes.Count(buf[:c], lineSep)
+		if err == io.EOF {
+			break
+		}
+	}
+	return count, nil
 }
