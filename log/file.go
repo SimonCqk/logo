@@ -203,7 +203,24 @@ RestartLogger:
 }
 
 func (w *fileLogWriter) deleteOld() {
-
+	dir := filepath.Dir(w.Filename)
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "Unable to delete old log file %s, error is: %s\n", path, r)
+			}
+		}()
+		if info == nil {
+			return nil
+		}
+		if !info.IsDir() &&
+			info.ModTime().Add(24*time.Hour*time.Duration(w.MaxDays)).Before(time.Now()) &&
+			strings.HasPrefix(filepath.Base(path), filepath.Base(w.fileNameOnly)) &&
+			strings.HasSuffix(filepath.Base(path), w.suffix) {
+			os.Remove(path)
+		}
+		return nil
+	})
 }
 
 func (w *fileLogWriter) lines() (int, error) {
