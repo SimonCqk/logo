@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,6 +37,8 @@ type fileLogWriter struct {
 	Level int `json:"level"`
 
 	Permission string `json:"permission"`
+
+	fileNameOnly, suffix string
 }
 
 // Create a FileLogWriter instance returning as Logger with default config
@@ -68,9 +71,11 @@ func (w *fileLogWriter) Init(config string) error {
 	if len(w.Filename) == 0 {
 		return errors.New("json config must specify filename")
 	}
+	w.suffix = filepath.Ext(w.Filename)
+	w.fileNameOnly = strings.TrimSuffix(w.Filename, w.suffix)
 	// append extension if not exist
-	if filepath.Ext(w.Filename) == "" {
-		w.Filename += ".log"
+	if w.suffix == "" {
+		w.suffix = ".log"
 	}
 	return w.startLogger()
 }
@@ -149,8 +154,56 @@ func (w *fileLogWriter) needRotate(day int) bool {
 		(w.Daily && day != w.dailyOpenDate)
 }
 
+// doRotate means write new log content to new file.
+// new file named like xx.yyyy-mm-dd.log (daily) or xx.001.log (by line or size)
 func (w *fileLogWriter) doRotate(now time.Time) error {
+	// find the next available number
+	num := 1
+	var fName string
+	_, err := os.Lstat(w.Filename)
+	if err != nil {
+		// file not exists or other, restart logger
+		goto RestartLogger
+	}
+
+	if w.MaxLines > 0 || w.MaxSize > 0 {
+		// by line or size enabled
+		for ; err == nil && num <= 999; num++ {
+			fName = w.fileNameOnly + fmt.Sprintf(".%s.%03d%s", now.Format("2006-01-02"), num, w.suffix)
+			_, err = os.Lstat(fName)
+		}
+	} else {
+		// by daily
+		fName = fmt.Sprintf("%s.%s%s", w.fileNameOnly, w.dailyOpenTime.Format("2006-01-02"), w.suffix)
+		_, err = os.Lstat(fName)
+		for ; err == nil && num <= 999; num++ {
+			fName = w.fileNameOnly + fmt.Sprintf(".%s.%03d%s", w.dailyOpenTime.Format("2006-01-02"), num, w.suffix)
+			_, err = os.Lstat(fName)
+		}
+	}
+	// the last file checked still exists
+	if err == nil {
+		return fmt.Errorf("Rotate: cannot find a free log number to rename %s\n", w.Filename)
+	}
+	w.fileWriter.Close()
+	err = os.Rename(w.Filename, fName)
+
+	// restart always
+RestartLogger:
+
+	startLoggerErr := w.startLogger()
+	go w.deleteOld()
+	if startLoggerErr != nil {
+		return fmt.Errorf("Rotate StartLogger: %s\n", startLoggerErr.Error())
+	}
+	if err != nil {
+		return fmt.Errorf("Rotate: %s\n", err.Error())
+	}
 	return nil
+}
+
+func (w *fileLogWriter) deleteOld() {
+
 }
 
 func (w *fileLogWriter) lines() (int, error) {
