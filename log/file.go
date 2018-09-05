@@ -41,6 +41,10 @@ type fileLogWriter struct {
 	fileNameOnly, suffix string
 }
 
+func init() {
+	Register(AdapterFile, newFileWriter)
+}
+
 // Create a FileLogWriter instance returning as Logger with default config
 func newFileWriter() Logger {
 	return &fileLogWriter{
@@ -81,20 +85,58 @@ func (w *fileLogWriter) Init(config string) error {
 }
 
 func (w *fileLogWriter) WriteMsg(level int, when time.Time, msg string) error {
+	if level > w.Level {
+		return nil
+	}
+	msg = timeHeaderFormatter(when) + msg + "\n"
+	if w.Rotate {
+		w.RLock()
+		// double-check lock
+		if w.needRotate(when.Day()) {
+			w.RUnlock()
+			w.Lock()
+			if w.needRotate(when.Day()) {
+				if err := w.doRotate(when); err != nil {
+					fmt.Fprintf(os.Stderr, "FileLogWriter[%s]: %s\n", w.Filename, err.Error())
+				}
+			}
+			w.Unlock()
+		} else {
+			w.RUnlock()
+		}
+	}
+	w.Lock()
+	_, err := w.fileWriter.Write([]byte(msg))
+	if err == nil {
+		w.curLines++
+		w.curSize += len(msg)
+	}
+	w.Unlock()
 	return nil
 }
 
+// commit current file context to stable disk, which means flush
+// system-level disk buffer to real disk
 func (w *fileLogWriter) Flush() {
-
+	w.fileWriter.Sync()
 }
 
 func (w *fileLogWriter) Destroy() {
-
+	w.fileWriter.Close()
 }
 
 // create log file and init
 func (w *fileLogWriter) startLogger() error {
-	return nil
+	file, err := w.createLogFile()
+	if err != nil {
+		return err
+	}
+	// close the old one
+	if w.fileWriter != nil {
+		w.fileWriter.Close()
+	}
+	w.fileWriter = file
+	return w.initFd()
 }
 
 func (w *fileLogWriter) createLogFile() (*os.File, error) {
@@ -102,7 +144,6 @@ func (w *fileLogWriter) createLogFile() (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	// according to Linux standard, do not forget O_WRONLY flag
 	fd, err := os.OpenFile(w.Filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.FileMode(perm))
 	if err == nil {
 		// make sure permission is user set case of `os.OpenFile` will obey umask
@@ -122,10 +163,14 @@ func (w *fileLogWriter) initFd() error {
 	w.dailyOpenDate = w.dailyOpenTime.Day()
 	w.curLines = 0
 	if w.Daily {
-
+		go w.dailyRotate(w.dailyOpenTime)
 	}
 	if fInfo.Size() > 0 {
-
+		lineCnt, err := w.lines()
+		if err != nil {
+			return err
+		}
+		w.curLines = lineCnt
 	}
 	return nil
 }
@@ -185,6 +230,7 @@ func (w *fileLogWriter) doRotate(now time.Time) error {
 	if err == nil {
 		return fmt.Errorf("Rotate: cannot find a free log number to rename %s\n", w.Filename)
 	}
+	// close file before rename
 	w.fileWriter.Close()
 	err = os.Rename(w.Filename, fName)
 
@@ -223,7 +269,7 @@ func (w *fileLogWriter) deleteOld() {
 	})
 }
 
-func (w *fileLogWriter) lines() (int, error) {
+func (w *fileLogWriter) lines() (count int, err error) {
 	// readonly
 	fd, err := os.Open(w.Filename)
 	if err != nil {
@@ -231,10 +277,10 @@ func (w *fileLogWriter) lines() (int, error) {
 	}
 	defer fd.Close()
 	// read 32k each time
-	// according to my verification, 4k~32k has a obvious performance gap,
-	// while >32k the gap slows down, so 32k is a suitable size
+	// according to verification, 4k~32k has a obvious performance gap,
+	// while >32k the gap shrinks sharply, so 32k is a suitable size
 	buf := make([]byte, 32*(1<<10))
-	count := 0
+	count = 0
 	lineSep := []byte{'\n'}
 	for {
 		c, err := fd.Read(buf)

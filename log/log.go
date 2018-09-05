@@ -22,6 +22,8 @@ var (
 const (
 	defaultCallDepth   = 2
 	defaultAsyncMsgLen = 1e3 // 1000
+
+	timestampFormat = "2006-01-02 15:04:05.999999"
 )
 
 // Log level constants
@@ -231,7 +233,18 @@ func (rl *RaftLogger) flush() {
 }
 
 func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
-	return
+	if len(msg) == 0 {
+		return 0, nil
+	}
+	// writeMsg will always add '\n'
+	if msg[len(msg)-1] == '\n' {
+		msg = msg[0 : len(msg)-1]
+	}
+	err = rl.writeMsg(LevelDebug, string(msg))
+	if err == nil {
+		return len(msg), err
+	}
+	return 0, nil
 }
 
 func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
@@ -310,4 +323,8 @@ func logFormatter(level int, msg string, v ...interface{}) string {
 	default:
 		return toLog
 	}
+}
+
+func timeHeaderFormatter(time time.Time) string {
+	return time.Format(timestampFormat)
 }
