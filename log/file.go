@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// impl of Logger Interface
+// Impl of Logger Interface [disk file]
 // It writes messages by lines limit, file size limit, or time frequency.
 type fileLogWriter struct {
 	sync.RWMutex

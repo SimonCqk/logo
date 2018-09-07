@@ -4,6 +4,7 @@ package log
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -99,6 +100,15 @@ type logMsg struct {
 	msg   string
 	level int
 	when  time.Time
+}
+
+type logWriter struct {
+	sync.Mutex
+	writer io.Writer
+}
+
+func newLogWriter(wr io.Writer) *logWriter {
+	return &logWriter{writer: wr}
 }
 
 var logMsgPool *sync.Pool
