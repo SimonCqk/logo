@@ -45,7 +45,7 @@ func init() {
 	Register(AdapterFile, newFileWriter)
 }
 
-// Create a FileLogWriter instance returning as Logger with default config
+// Create new FileLogWriter returning as Logger with default config
 func newFileWriter() Logger {
 	return &fileLogWriter{
 		Daily:      true,
