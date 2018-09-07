@@ -1,6 +1,6 @@
 package log
 
-/// `log` package of Raft-Go, inspired by Beego.
+/// `log` package of logo, inspired by Beego.
 
 import (
 	"fmt"
@@ -11,13 +11,13 @@ import (
 )
 
 var (
-	defaultLogger = &RaftLogger{
+	defaultLogger = LogoLogger{
 		level:      LevelDebug,
 		callDepth:  defaultCallDepth,
 		msgChanLen: defaultAsyncMsgLen,
 		outputs:    []*namedLogger{},
 	}
-	raftLogger = defaultLogger
+	logoLogger = &defaultLogger
 )
 
 const (
@@ -78,8 +78,8 @@ func Register(name string, loggerFunc newLoggerFunc) {
 	adapters[name] = loggerFunc
 }
 
-// RaftLogger is the default logger in Raft-Go
-type RaftLogger struct {
+// LogoLogger is the default logger in logo
+type LogoLogger struct {
 	lock       sync.Mutex
 	init       bool
 	async      bool
@@ -114,10 +114,10 @@ func newLogWriter(wr io.Writer) *logWriter {
 
 var logMsgPool *sync.Pool
 
-// NewLogger returns a new RaftLogger instance pointer.
+// NewLogger returns a new LogoLogger instance pointer.
 // chanLen means the number of messages in chan(when async is true)
-func NewLogger(chanLen ...int64) *RaftLogger {
-	rl := RaftLogger{
+func NewLogger(chanLen ...int64) *LogoLogger {
+	rl := LogoLogger{
 		level:      LevelDebug,
 		callDepth:  defaultCallDepth,
 		msgChanLen: append(chanLen, 0)[0],
@@ -129,16 +129,16 @@ func NewLogger(chanLen ...int64) *RaftLogger {
 	return &rl
 }
 
-func (rl *RaftLogger) EnableDebug() {
+func (rl *LogoLogger) EnableDebug() {
 	rl.level = LevelDebug
 }
 
-func (rl *RaftLogger) SetLevel(level int) {
+func (rl *LogoLogger) SetLevel(level int) {
 	rl.level = level
 }
 
 // Async enables asynchronous logging.
-func (rl *RaftLogger) Async(msgLen int64) *RaftLogger {
+func (rl *LogoLogger) Async(msgLen int64) *LogoLogger {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
 	if rl.async {
@@ -160,7 +160,7 @@ func (rl *RaftLogger) Async(msgLen int64) *RaftLogger {
 // startLogger is the concrete goroutine serves for async-logging.
 // It receives msg to log or receives signal and reacts by what signal
 // instructs, `flush` or `close`.
-func (rl *RaftLogger) startLogger() {
+func (rl *LogoLogger) startLogger() {
 	exit := false
 	for {
 		select {
@@ -185,9 +185,9 @@ func (rl *RaftLogger) startLogger() {
 	}
 }
 
-// SetLogger provides a registered logger into RaftLogger with config.
+// SetLogger provides a registered logger into LogoLogger with config.
 // Config should be JSON-format, and it will initialize logger in Init().
-func (rl *RaftLogger) SetLogger(adapterName string, configs ...string) error {
+func (rl *LogoLogger) SetLogger(adapterName string, configs ...string) error {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
 	if !rl.init {
@@ -199,7 +199,7 @@ func (rl *RaftLogger) SetLogger(adapterName string, configs ...string) error {
 
 // Remove a logger adapter with given name, no error returned,
 // if invalid adapterName passed in, then do nothing.
-func (rl *RaftLogger) DelLogger(adapterName string) {
+func (rl *LogoLogger) DelLogger(adapterName string) {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
 	idx := 0
@@ -219,7 +219,7 @@ func (rl *RaftLogger) DelLogger(adapterName string) {
 
 // setLogger adds an output target for logging, it can be console, file, remote
 // address...etc
-func (rl *RaftLogger) setLogger(adapterName string, configs ...string) error {
+func (rl *LogoLogger) setLogger(adapterName string, configs ...string) error {
 	config := append(configs, "{}")[0]
 	for _, l := range rl.outputs {
 		if l.name == adapterName {
@@ -240,7 +240,7 @@ func (rl *RaftLogger) setLogger(adapterName string, configs ...string) error {
 	return nil
 }
 
-func (rl *RaftLogger) writeToLoggers(msg *logMsg) {
+func (rl *LogoLogger) writeToLoggers(msg *logMsg) {
 	for _, output := range rl.outputs {
 		err := output.WriteMsg(msg.level, msg.when, msg.msg)
 		if err != nil {
@@ -249,7 +249,7 @@ func (rl *RaftLogger) writeToLoggers(msg *logMsg) {
 	}
 }
 
-func (rl *RaftLogger) flush() {
+func (rl *LogoLogger) flush() {
 	if rl.async {
 		for {
 			// fetch all log message and write to logger instantly.
@@ -267,7 +267,7 @@ func (rl *RaftLogger) flush() {
 	}
 }
 
-func (rl *RaftLogger) Flush() {
+func (rl *LogoLogger) Flush() {
 	if rl.async {
 		rl.signalChan <- "flush"
 		rl.wg.Wait()
@@ -277,7 +277,7 @@ func (rl *RaftLogger) Flush() {
 	rl.flush()
 }
 
-func (rl *RaftLogger) Close() {
+func (rl *LogoLogger) Close() {
 	if rl.async {
 		rl.signalChan <- "close"
 		rl.wg.Wait()
@@ -292,7 +292,7 @@ func (rl *RaftLogger) Close() {
 	close(rl.signalChan)
 }
 
-func (rl *RaftLogger) Reset() {
+func (rl *LogoLogger) Reset() {
 	rl.Flush()
 	for _, l := range rl.outputs {
 		l.Destroy()
@@ -300,7 +300,7 @@ func (rl *RaftLogger) Reset() {
 	rl.outputs = nil
 }
 
-func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
+func (rl *LogoLogger) Write(msg []byte) (n int, err error) {
 	if len(msg) == 0 {
 		return 0, nil
 	}
@@ -315,7 +315,7 @@ func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
 	return 0, nil
 }
 
-func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
+func (rl *LogoLogger) writeMsg(level int, msg string, v ...interface{}) error {
 	if !rl.init {
 		rl.lock.Lock()
 		rl.setLogger(AdapterConsole)
@@ -338,46 +338,67 @@ func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
 	return nil
 }
 
-func (rl *RaftLogger) Debug(format string, v ...interface{}) {
+func (rl *LogoLogger) Debug(format string, v ...interface{}) {
 	if rl.level > LevelDebug {
 		return
 	}
 	rl.writeMsg(LevelDebug, format, v...)
 }
 
-func (rl *RaftLogger) Info(format string, v ...interface{}) {
+func (rl *LogoLogger) Info(format string, v ...interface{}) {
 	if rl.level > LevelInfo {
 		return
 	}
 	rl.writeMsg(LevelInfo, format, v...)
 }
 
-func (rl *RaftLogger) Warning(format string, v ...interface{}) {
+func (rl *LogoLogger) Warning(format string, v ...interface{}) {
 	if rl.level > LevelWarning {
 		return
 	}
 	rl.writeMsg(LevelWarning, format, v...)
 }
 
-func (rl *RaftLogger) Error(format string, v ...interface{}) {
+func (rl *LogoLogger) Error(format string, v ...interface{}) {
 	if rl.level > LevelError {
 		return
 	}
 	rl.writeMsg(LevelError, format, v...)
 }
 
-func (rl *RaftLogger) Fatal(format string, v ...interface{}) {
+func (rl *LogoLogger) Fatal(format string, v ...interface{}) {
 	if rl.level > LevelFatal {
 		return
 	}
 	rl.writeMsg(LevelFatal, format, v...)
 }
 
-func (rl *RaftLogger) Panic(format string, v ...interface{}) {
+func (rl *LogoLogger) Panic(format string, v ...interface{}) {
 	if rl.level > LevelPanic {
 		return
 	}
 	rl.writeMsg(LevelPanic, format, v...)
+}
+
+func GetLogoLogger() *LogoLogger {
+	return logoLogger
+}
+
+// module level method-wrappers, actually op on default logger.
+func Reset() {
+	logoLogger.Reset()
+}
+
+func Async(msgLen ...int64) *LogoLogger {
+	return logoLogger.Async(append(msgLen, defaultAsyncMsgLen)[0])
+}
+
+func SetLevel(level int) {
+	logoLogger.SetLevel(level)
+}
+
+func SetLogger(adapterName string, config ...string) error {
+	return logoLogger.setLogger(adapterName, config...)
 }
 
 func logFormatter(level int, msg string, v ...interface{}) string {
