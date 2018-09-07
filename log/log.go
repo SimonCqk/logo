@@ -197,6 +197,26 @@ func (rl *RaftLogger) SetLogger(adapterName string, configs ...string) error {
 	return rl.setLogger(adapterName, configs...)
 }
 
+// Remove a logger adapter with given name, no error returned,
+// if invalid adapterName passed in, then do nothing.
+func (rl *RaftLogger) DelLogger(adapterName string) {
+	rl.lock.Lock()
+	defer rl.lock.Unlock()
+	idx := 0
+	for _, lg := range rl.outputs {
+		if lg.name == adapterName {
+			lg.Destroy()
+			break
+		}
+		idx++
+	}
+	// remove logger by index, if no registered logger found, idx == len(rl.outputs)
+	if idx < len(rl.outputs) {
+		copy(rl.outputs[idx:], rl.outputs[idx+1:])
+		rl.outputs = rl.outputs[:len(rl.outputs)-1]
+	}
+}
+
 // setLogger adds an output target for logging, it can be console, file, remote
 // address...etc
 func (rl *RaftLogger) setLogger(adapterName string, configs ...string) error {
@@ -245,6 +265,39 @@ func (rl *RaftLogger) flush() {
 	for _, output := range rl.outputs {
 		output.Flush()
 	}
+}
+
+func (rl *RaftLogger) Flush() {
+	if rl.async {
+		rl.signalChan <- "flush"
+		rl.wg.Wait()
+		rl.wg.Add(1)
+		return
+	}
+	rl.flush()
+}
+
+func (rl *RaftLogger) Close() {
+	if rl.async {
+		rl.signalChan <- "close"
+		rl.wg.Wait()
+		close(rl.msgChan)
+	} else {
+		rl.flush()
+		for _, l := range rl.outputs {
+			l.Destroy()
+		}
+		rl.outputs = nil
+	}
+	close(rl.signalChan)
+}
+
+func (rl *RaftLogger) Reset() {
+	rl.Flush()
+	for _, l := range rl.outputs {
+		l.Destroy()
+	}
+	rl.outputs = nil
 }
 
 func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
