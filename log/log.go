@@ -38,12 +38,12 @@ const (
 )
 
 var logLevelPrefix = map[int]string{
-	LevelInfo:    "Info",
-	LevelDebug:   "Debug",
-	LevelWarning: "Warning",
-	LevelError:   "Error",
-	LevelFatal:   "Fatal",
-	LevelPanic:   "Panic",
+	LevelInfo:    "[Info]",
+	LevelDebug:   "[Debug]",
+	LevelWarning: "[Warning]",
+	LevelError:   "[Error]",
+	LevelFatal:   "[Fatal]",
+	LevelPanic:   "[Panic]",
 }
 
 // Name for logger adapters
@@ -81,6 +81,7 @@ func Register(name string, loggerFunc newLoggerFunc) {
 // RaftLogger is the default logger in Raft-Go
 type RaftLogger struct {
 	lock       sync.Mutex
+	init       bool
 	async      bool
 	level      int
 	callDepth  int
@@ -189,6 +190,10 @@ func (rl *RaftLogger) startLogger() {
 func (rl *RaftLogger) SetLogger(adapterName string, configs ...string) error {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
+	if !rl.init {
+		rl.outputs = []*namedLogger{}
+		rl.init = true
+	}
 	return rl.setLogger(adapterName, configs...)
 }
 
@@ -258,6 +263,11 @@ func (rl *RaftLogger) Write(msg []byte) (n int, err error) {
 }
 
 func (rl *RaftLogger) writeMsg(level int, msg string, v ...interface{}) error {
+	if !rl.init {
+		rl.lock.Lock()
+		rl.setLogger(AdapterConsole)
+		rl.lock.Unlock()
+	}
 	if rl.async {
 		lm := logMsgPool.Get().(*logMsg)
 		lm.level = level
