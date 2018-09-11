@@ -30,6 +30,13 @@ func NewConnWriter() Logger {
 }
 
 // Init connection logger with json config.
+// use it like:
+// {
+// "reconnect": false,
+// "net": "tcp",
+// "addr": "127.0.0.1:8080",
+// "level": LevelDebug
+// }
 func (c *connLogWriter) Init(config string) error {
 	return json.Unmarshal([]byte(config), c)
 }
@@ -56,7 +63,7 @@ func (c *connLogWriter) Destroy() {
 	}
 }
 
-// Flush does nothing on connection.
+// Flush impl method and does nothing on connection.
 func (c *connLogWriter) Flush() {
 
 }
