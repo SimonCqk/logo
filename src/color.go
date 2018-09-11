@@ -20,11 +20,24 @@ const (
 const colorFormatTemplate = "\x1b[0;%dm%s\x1b[0m"
 
 // return processed text with specified color.
-func coloredText(color int, str string) string {
+func coloredText(level int, str string) string {
 	if isWindows() {
 		return str
 	}
-	return fmt.Sprintf(colorFormatTemplate, color, str)
+	switch level {
+	case LevelInfo:
+		return fmt.Sprintf(colorFormatTemplate, TextWhite, str)
+	case LevelDebug:
+		return fmt.Sprintf(colorFormatTemplate, TextCyan, str)
+	case LevelWarning:
+		return fmt.Sprintf(colorFormatTemplate, TextYellow, str)
+	case LevelError:
+		return fmt.Sprintf(colorFormatTemplate, TextMagenta, str)
+	case LevelFatal, LevelPanic:
+		return fmt.Sprintf(colorFormatTemplate, TextRed, str)
+	default:
+		return str
+	}
 }
 
 func isWindows() bool {

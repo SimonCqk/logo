@@ -331,13 +331,13 @@ func (rl *LogoLogger) writeMsg(level int, msg string, v ...interface{}) error {
 	if rl.async {
 		lm := logMsgPool.Get().(*logMsg)
 		lm.level = level
-		lm.msg = logFormatter(level, msg, v...)
+		lm.msg = logLevelPrefix[level] + fmt.Sprintf(msg, v...)
 		lm.when = time.Now()
 		rl.msgChan <- lm
 	} else {
 		lm := &logMsg{
 			level: level,
-			msg:   logFormatter(level, msg, v...),
+			msg:   logLevelPrefix[level] + fmt.Sprintf(msg, v...),
 			when:  time.Now(),
 		}
 		rl.writeToLoggers(lm)
@@ -406,24 +406,6 @@ func SetLevel(level int) {
 
 func SetLogger(adapterName string, config ...string) error {
 	return logoLogger.setLogger(adapterName, config...)
-}
-
-func logFormatter(level int, msg string, v ...interface{}) string {
-	toLog := logLevelPrefix[level] + fmt.Sprintf(msg, v...)
-	switch level {
-	case LevelInfo:
-		return coloredText(TextWhite, toLog)
-	case LevelDebug:
-		return coloredText(TextCyan, toLog)
-	case LevelWarning:
-		return coloredText(TextYellow, toLog)
-	case LevelError:
-		return coloredText(TextMagenta, toLog)
-	case LevelFatal, LevelPanic:
-		return coloredText(TextRed, toLog)
-	default:
-		return toLog
-	}
 }
 
 func timeHeaderFormatter(time time.Time) string {
