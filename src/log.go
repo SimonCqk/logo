@@ -51,7 +51,7 @@ const (
 	AdapterConsole = "console"
 	AdapterFile    = "file"
 	AdapterMail    = "mail"
-	AdapterConnect = "connect"
+	AdapterConn    = "connect"
 )
 
 type newLoggerFunc func() Logger
@@ -110,6 +110,13 @@ type logWriter struct {
 
 func newLogWriter(wr io.Writer) *logWriter {
 	return &logWriter{writer: wr}
+}
+
+func (lg *logWriter) println(when time.Time, msg string) {
+	lg.Lock()
+	h := []byte(timeHeaderFormatter(when))
+	lg.writer.Write(append(append(h, msg...), '\n'))
+	lg.Unlock()
 }
 
 var logMsgPool *sync.Pool
