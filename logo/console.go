@@ -1,4 +1,4 @@
-package src
+package logo
 
 import (
 	"encoding/json"

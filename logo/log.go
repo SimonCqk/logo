@@ -1,6 +1,6 @@
-package src
+package logo
 
-/// `src` package of logo, inspired by Beego.
+/// `logo` package of logo, inspired by Beego.
 
 import (
 	"fmt"
@@ -66,14 +66,14 @@ type Logger interface {
 // adapters for diff-kinds of logging output instance.
 var adapters = make(map[string]newLoggerFunc)
 
-// Register makes a src provider available by the provided name.
+// Register makes a logo provider available by the provided name.
 // Redundant registration will lead panic.
 func Register(name string, loggerFunc newLoggerFunc) {
 	if loggerFunc == nil {
-		panic("src: Register provider is nil")
+		panic("logo: Register provider is nil")
 	}
 	if _, dup := adapters[name]; dup {
-		panic("src: Named provider has existed, name: " + name)
+		panic("logo: Named provider has existed, name: " + name)
 	}
 	adapters[name] = loggerFunc
 }
@@ -165,7 +165,7 @@ func (rl *LogoLogger) Async(msgLen int64) *LogoLogger {
 }
 
 // startLogger is the concrete goroutine serves for async-logging.
-// It receives msg to src or receives signal and reacts by what signal
+// It receives msg to logo or receives signal and reacts by what signal
 // instructs, `flush` or `close`.
 func (rl *LogoLogger) startLogger() {
 	exit := false
@@ -230,17 +230,17 @@ func (rl *LogoLogger) setLogger(adapterName string, configs ...string) error {
 	config := append(configs, "{}")[0]
 	for _, l := range rl.outputs {
 		if l.name == adapterName {
-			return fmt.Errorf("src: redundant adapter name %s (you've set this logger before)", adapterName)
+			return fmt.Errorf("logo: redundant adapter name %s (you've set this logger before)", adapterName)
 		}
 	}
 	logFunc, ok := adapters[adapterName]
 	if !ok {
-		return fmt.Errorf("src: unkown adapter name %s (please register it before)", adapterName)
+		return fmt.Errorf("logo: unkown adapter name %s (please register it before)", adapterName)
 	}
 	lg := logFunc()
 	err := lg.Init(config)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "src.SetLogger: "+err.Error())
+		fmt.Fprintln(os.Stderr, "logo.SetLogger: "+err.Error())
 		return err
 	}
 	rl.outputs = append(rl.outputs, &namedLogger{name: adapterName, Logger: lg})
@@ -259,7 +259,7 @@ func (rl *LogoLogger) writeToLoggers(msg *logMsg) {
 func (rl *LogoLogger) flush() {
 	if rl.async {
 		for {
-			// fetch all src message and write to logger instantly.
+			// fetch all logo message and write to logger instantly.
 			if len(rl.msgChan) > 0 {
 				m := <-rl.msgChan
 				rl.writeToLoggers(m)

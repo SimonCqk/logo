@@ -1,4 +1,4 @@
-package src
+package logo
 
 import (
 	"bytes"
@@ -59,7 +59,7 @@ func newFileWriter() Logger {
 // Init file logger with json config.
 // use it like:
 //  {
-//  "filename":"tmp/src.src",
+//  "filename":"tmp/logo.logo",
 //  "maxLines":10000,
 //  "maxSize": 1024,
 //  "daily":true,
@@ -79,7 +79,7 @@ func (w *fileLogWriter) Init(config string) error {
 	w.fileNameOnly = strings.TrimSuffix(w.Filename, w.suffix)
 	// append extension if not exist
 	if w.suffix == "" {
-		w.suffix = ".src"
+		w.suffix = ".logo"
 	}
 	return w.startLogger()
 }
@@ -125,7 +125,7 @@ func (w *fileLogWriter) Destroy() {
 	w.fileWriter.Close()
 }
 
-// create src file and init
+// create logo file and init
 func (w *fileLogWriter) startLogger() error {
 	file, err := w.createLogFile()
 	if err != nil {
@@ -199,8 +199,8 @@ func (w *fileLogWriter) needRotate(day int) bool {
 		(w.Daily && day != w.dailyOpenDate)
 }
 
-// doRotate means write new src content to new file.
-// new file named like xx.yyyy-mm-dd.src (daily) or xx.001.src (by line or size)
+// doRotate means write new logo content to new file.
+// new file named like xx.yyyy-mm-dd.logo (daily) or xx.001.logo (by line or size)
 func (w *fileLogWriter) doRotate(now time.Time) error {
 	// find the next available number
 	num := 1
@@ -228,7 +228,7 @@ func (w *fileLogWriter) doRotate(now time.Time) error {
 	}
 	// the last file checked still exists
 	if err == nil {
-		return fmt.Errorf("Rotate: cannot find a free src number to rename %s\n", w.Filename)
+		return fmt.Errorf("Rotate: cannot find a free logo number to rename %s\n", w.Filename)
 	}
 	// close file before rename
 	w.fileWriter.Close()
@@ -253,7 +253,7 @@ func (w *fileLogWriter) deleteOld() {
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Fprintf(os.Stderr, "Unable to delete old src file %s, error is: %s\n", path, r)
+				fmt.Fprintf(os.Stderr, "Unable to delete old logo file %s, error is: %s\n", path, r)
 			}
 		}()
 		if info == nil {
