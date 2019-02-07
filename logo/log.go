@@ -87,7 +87,8 @@ type LogoLogger struct {
 	callDepth  int
 	msgChanLen int64
 	msgChan    chan *logMsg
-	signalChan chan string
+	flushChan  chan struct{}
+	closeChan  chan struct{}
 	wg         sync.WaitGroup
 	outputs    []*namedLogger
 }
@@ -128,7 +129,8 @@ func NewLogger(chanLen ...int64) *LogoLogger {
 		level:      LevelDebug,
 		callDepth:  defaultCallDepth,
 		msgChanLen: append(chanLen, 0)[0],
-		signalChan: make(chan string, 1),
+		flushChan:  make(chan struct{}, 1),
+		closeChan:  make(chan struct{}),
 	}
 	if rl.msgChanLen <= 0 {
 		rl.msgChanLen = defaultAsyncMsgLen
@@ -136,99 +138,95 @@ func NewLogger(chanLen ...int64) *LogoLogger {
 	return &rl
 }
 
-func (rl *LogoLogger) EnableDebug() {
-	rl.level = LevelDebug
+func (l *LogoLogger) EnableDebug() {
+	l.level = LevelDebug
 }
 
-func (rl *LogoLogger) SetLevel(level int) {
-	rl.level = level
+func (l *LogoLogger) SetLevel(level int) {
+	l.level = level
 }
 
 // Async enables asynchronous logging.
-func (rl *LogoLogger) Async(msgLen int64) *LogoLogger {
-	rl.lock.Lock()
-	defer rl.lock.Unlock()
-	if rl.async {
-		return rl
+func (l *LogoLogger) Async(msgLen int64) *LogoLogger {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	if l.async {
+		return l
 	}
-	rl.async = true
-	rl.msgChanLen = msgLen
-	rl.msgChan = make(chan *logMsg, rl.msgChanLen)
+	l.async = true
+	l.msgChanLen = msgLen
+	l.msgChan = make(chan *logMsg, l.msgChanLen)
 	logMsgPool = &sync.Pool{
 		New: func() interface{} {
 			return &logMsg{}
 		},
 	}
-	rl.wg.Add(1)
-	go rl.startLogger()
-	return rl
+	l.wg.Add(1)
+	go l.startLogger()
+	return l
 }
 
 // startLogger is the concrete goroutine serves for async-logging.
 // It receives msg to logo or receives signal and reacts by what signal
 // instructs, `flush` or `close`.
-func (rl *LogoLogger) startLogger() {
-	exit := false
+func (l *LogoLogger) startLogger() {
 	for {
 		select {
-		case msg := <-rl.msgChan:
-			rl.writeToLoggers(msg)
+		case msg := <-l.msgChan:
+			l.writeToLoggers(msg)
 			logMsgPool.Put(msg)
-		case sig := <-rl.signalChan:
-			// signals include: `flush`, `close`
-			rl.flush()
-			if sig == "close" {
-				for _, output := range rl.outputs {
-					output.Destroy()
-				}
-				rl.outputs = nil
-				exit = true
+		case <-l.flushChan:
+			l.flush()
+			l.wg.Done()
+		case <-l.closeChan:
+			l.flush()
+			for _, output := range l.outputs {
+				output.Destroy()
 			}
-			rl.wg.Done()
-		}
-		if exit {
-			break
+			l.outputs = nil
+			l.wg.Done()
+			return
 		}
 	}
 }
 
 // SetLogger provides a registered logger into LogoLogger with config.
 // Config should be JSON-format, and it will initialize logger in Init().
-func (rl *LogoLogger) SetLogger(adapterName string, configs ...string) error {
-	rl.lock.Lock()
-	defer rl.lock.Unlock()
-	if !rl.init {
-		rl.outputs = []*namedLogger{}
-		rl.init = true
+func (l *LogoLogger) SetLogger(adapterName string, configs ...string) error {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	if !l.init {
+		l.outputs = []*namedLogger{}
+		l.init = true
 	}
-	return rl.setLogger(adapterName, configs...)
+	return l.setLogger(adapterName, configs...)
 }
 
 // Remove a logger adapter with given name, no error returned,
 // if invalid adapterName passed in, then do nothing.
-func (rl *LogoLogger) DelLogger(adapterName string) {
-	rl.lock.Lock()
-	defer rl.lock.Unlock()
+func (l *LogoLogger) DelLogger(adapterName string) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	idx := 0
-	for _, lg := range rl.outputs {
+	for _, lg := range l.outputs {
 		if lg.name == adapterName {
 			lg.Destroy()
 			break
 		}
 		idx++
 	}
-	// remove logger by index, if no registered logger found, idx == len(rl.outputs)
-	if idx < len(rl.outputs) {
-		copy(rl.outputs[idx:], rl.outputs[idx+1:])
-		rl.outputs = rl.outputs[:len(rl.outputs)-1]
+	// remove logger by index, if no registered logger found, idx == len(l.outputs)
+	if idx < len(l.outputs) {
+		copy(l.outputs[idx:], l.outputs[idx+1:])
+		l.outputs = l.outputs[:len(l.outputs)-1]
 	}
 }
 
 // setLogger adds an output target for logging, it can be console, file, remote
 // address...etc
-func (rl *LogoLogger) setLogger(adapterName string, configs ...string) error {
+func (l *LogoLogger) setLogger(adapterName string, configs ...string) error {
 	config := append(configs, "{}")[0]
-	for _, l := range rl.outputs {
+	for _, l := range l.outputs {
 		if l.name == adapterName {
 			return fmt.Errorf("logo: redundant adapter name %s (you've set this logger before)", adapterName)
 		}
@@ -243,12 +241,12 @@ func (rl *LogoLogger) setLogger(adapterName string, configs ...string) error {
 		fmt.Fprintln(os.Stderr, "logo.SetLogger: "+err.Error())
 		return err
 	}
-	rl.outputs = append(rl.outputs, &namedLogger{name: adapterName, Logger: lg})
+	l.outputs = append(l.outputs, &namedLogger{name: adapterName, Logger: lg})
 	return nil
 }
 
-func (rl *LogoLogger) writeToLoggers(msg *logMsg) {
-	for _, output := range rl.outputs {
+func (l *LogoLogger) writeToLoggers(msg *logMsg) {
+	for _, output := range l.outputs {
 		err := output.WriteMsg(msg.level, msg.when, msg.msg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to write msg to %s, err is %s", output.name, err.Error())
@@ -256,58 +254,59 @@ func (rl *LogoLogger) writeToLoggers(msg *logMsg) {
 	}
 }
 
-func (rl *LogoLogger) flush() {
-	if rl.async {
+func (l *LogoLogger) flush() {
+	if l.async {
 		for {
 			// fetch all logo message and write to logger instantly.
-			if len(rl.msgChan) > 0 {
-				m := <-rl.msgChan
-				rl.writeToLoggers(m)
+			if len(l.msgChan) > 0 {
+				m := <-l.msgChan
+				l.writeToLoggers(m)
 				logMsgPool.Put(m)
 				continue
 			}
 			break
 		}
 	}
-	for _, output := range rl.outputs {
+	for _, output := range l.outputs {
 		output.Flush()
 	}
 }
 
-func (rl *LogoLogger) Flush() {
-	if rl.async {
-		rl.signalChan <- "flush"
-		rl.wg.Wait()
-		rl.wg.Add(1)
+func (l *LogoLogger) Flush() {
+	if l.async {
+		l.flushChan <- struct{}{}
+		l.wg.Wait()
+		l.wg.Add(1)
 		return
 	}
-	rl.flush()
+	l.flush()
 }
 
-func (rl *LogoLogger) Close() {
-	if rl.async {
-		rl.signalChan <- "close"
-		rl.wg.Wait()
-		close(rl.msgChan)
+func (l *LogoLogger) Close() {
+	if l.async {
+		l.closeChan <- struct{}{}
+		l.wg.Wait()
+		close(l.msgChan)
 	} else {
-		rl.flush()
-		for _, l := range rl.outputs {
+		l.flush()
+		for _, l := range l.outputs {
 			l.Destroy()
 		}
-		rl.outputs = nil
+		l.outputs = nil
 	}
-	close(rl.signalChan)
+	close(l.closeChan)
+	close(l.flushChan)
 }
 
-func (rl *LogoLogger) Reset() {
-	rl.Flush()
-	for _, l := range rl.outputs {
+func (l *LogoLogger) Reset() {
+	l.Flush()
+	for _, l := range l.outputs {
 		l.Destroy()
 	}
-	rl.outputs = nil
+	l.outputs = nil
 }
 
-func (rl *LogoLogger) Write(msg []byte) (n int, err error) {
+func (l *LogoLogger) Write(msg []byte) (n int, err error) {
 	if len(msg) == 0 {
 		return 0, nil
 	}
@@ -315,76 +314,76 @@ func (rl *LogoLogger) Write(msg []byte) (n int, err error) {
 	if msg[len(msg)-1] == '\n' {
 		msg = msg[0 : len(msg)-1]
 	}
-	err = rl.writeMsg(LevelDebug, string(msg))
+	err = l.writeMsg(LevelDebug, string(msg))
 	if err == nil {
 		return len(msg), err
 	}
 	return 0, nil
 }
 
-func (rl *LogoLogger) writeMsg(level int, msg string, v ...interface{}) error {
-	if !rl.init {
-		rl.lock.Lock()
-		rl.setLogger(AdapterConsole)
-		rl.lock.Unlock()
+func (l *LogoLogger) writeMsg(level int, msg string, v ...interface{}) error {
+	if !l.init {
+		l.lock.Lock()
+		l.setLogger(AdapterConsole)
+		l.lock.Unlock()
 	}
-	if rl.async {
+	if l.async {
 		lm := logMsgPool.Get().(*logMsg)
 		lm.level = level
 		lm.msg = logLevelPrefix[level] + fmt.Sprintf(msg, v...)
 		lm.when = time.Now()
-		rl.msgChan <- lm
+		l.msgChan <- lm
 	} else {
 		lm := &logMsg{
 			level: level,
 			msg:   logLevelPrefix[level] + fmt.Sprintf(msg, v...),
 			when:  time.Now(),
 		}
-		rl.writeToLoggers(lm)
+		l.writeToLoggers(lm)
 	}
 	return nil
 }
 
-func (rl *LogoLogger) Debug(format string, v ...interface{}) {
-	if rl.level > LevelDebug {
+func (l *LogoLogger) Debug(format string, v ...interface{}) {
+	if l.level > LevelDebug {
 		return
 	}
-	rl.writeMsg(LevelDebug, format, v...)
+	l.writeMsg(LevelDebug, format, v...)
 }
 
-func (rl *LogoLogger) Info(format string, v ...interface{}) {
-	if rl.level > LevelInfo {
+func (l *LogoLogger) Info(format string, v ...interface{}) {
+	if l.level > LevelInfo {
 		return
 	}
-	rl.writeMsg(LevelInfo, format, v...)
+	l.writeMsg(LevelInfo, format, v...)
 }
 
-func (rl *LogoLogger) Warning(format string, v ...interface{}) {
-	if rl.level > LevelWarning {
+func (l *LogoLogger) Warning(format string, v ...interface{}) {
+	if l.level > LevelWarning {
 		return
 	}
-	rl.writeMsg(LevelWarning, format, v...)
+	l.writeMsg(LevelWarning, format, v...)
 }
 
-func (rl *LogoLogger) Error(format string, v ...interface{}) {
-	if rl.level > LevelError {
+func (l *LogoLogger) Error(format string, v ...interface{}) {
+	if l.level > LevelError {
 		return
 	}
-	rl.writeMsg(LevelError, format, v...)
+	l.writeMsg(LevelError, format, v...)
 }
 
-func (rl *LogoLogger) Fatal(format string, v ...interface{}) {
-	if rl.level > LevelFatal {
+func (l *LogoLogger) Fatal(format string, v ...interface{}) {
+	if l.level > LevelFatal {
 		return
 	}
-	rl.writeMsg(LevelFatal, format, v...)
+	l.writeMsg(LevelFatal, format, v...)
 }
 
-func (rl *LogoLogger) Panic(format string, v ...interface{}) {
-	if rl.level > LevelPanic {
+func (l *LogoLogger) Panic(format string, v ...interface{}) {
+	if l.level > LevelPanic {
 		return
 	}
-	rl.writeMsg(LevelPanic, format, v...)
+	l.writeMsg(LevelPanic, format, v...)
 }
 
 func GetLogoLogger() *LogoLogger {
